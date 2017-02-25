@@ -82,6 +82,7 @@ func (kb *Keyboard) Start() {
 	for {
 		select {
 		case <-kb.stop:
+			kb.dev.Close()
 			return
 		default:
 		}

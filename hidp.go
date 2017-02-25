@@ -165,7 +165,7 @@ func (p *HidProfile) Export() error {
 func (p *HidProfile) Register(desc string) error {
 	callback := make(chan *dbus.Call, 1)
 
-	tpl, err := template.ParseGlob(sdpTpl)
+	tpl, err := template.New("sdp").Parse(sdpTpl)
 	if err != nil {
 		return err
 	}
