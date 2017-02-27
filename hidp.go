@@ -2,8 +2,7 @@ package main
 
 import (
 	"fmt"
-
-	"golang.org/x/sys/unix"
+	"syscall"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/godbus/dbus"
@@ -115,7 +114,7 @@ func (p *HidProfile) NewConnection(dev dbus.ObjectPath, fd dbus.UnixFD, fdProps 
 	sctrl, err := NewBluetoothSocket(int(fd))
 	if err != nil {
 		logrus.WithError(err).Errorln("Failed to create bluetooth socket")
-		unix.Close(int(fd))
+		syscall.Close(int(fd))
 		return dbus.NewError("failed to create bluetooth socket", []interface{}{err})
 	}
 

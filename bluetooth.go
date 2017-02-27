@@ -9,8 +9,10 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/pkg/errors"
+)
 
-	"golang.org/x/sys/unix"
+const (
+	BTPROTO_L2CAP = 0
 )
 
 type socklen uint32
@@ -31,7 +33,7 @@ type sockaddrL2 struct {
 }
 
 func (sa *sockaddrL2) sockaddr() (unsafe.Pointer, socklen, error) {
-	sa.raw.Family = unix.AF_BLUETOOTH
+	sa.raw.Family = syscall.AF_BLUETOOTH
 	sa.raw.Psm = uint16(sa.PSM)
 	sa.raw.Bdaddr = sa.Bdaddr
 
@@ -83,7 +85,7 @@ func (bt *Bluetooth) SetBlocking(block bool) error {
 	bt.mu.Lock()
 	defer bt.mu.Unlock()
 
-	dFlgPtr, _, err := unix.Syscall(unix.SYS_FCNTL, uintptr(bt.fd), unix.F_GETFL, 0)
+	dFlgPtr, _, err := syscall.Syscall(syscall.SYS_FCNTL, uintptr(bt.fd), syscall.F_GETFL, 0)
 
 	if err != 0 {
 		return errors.Wrap(err, "failed in SetBlocking")
@@ -91,12 +93,12 @@ func (bt *Bluetooth) SetBlocking(block bool) error {
 
 	var delayFlag uint
 	if block {
-		delayFlag = uint(dFlgPtr) & (^(uint)(unix.O_NONBLOCK))
+		delayFlag = uint(dFlgPtr) & (^(uint)(syscall.O_NONBLOCK))
 	} else {
-		delayFlag = uint(dFlgPtr) | ((uint)(unix.O_NONBLOCK))
+		delayFlag = uint(dFlgPtr) | ((uint)(syscall.O_NONBLOCK))
 	}
 
-	_, _, err = unix.Syscall(unix.SYS_FCNTL, uintptr(bt.fd), unix.F_SETFL, uintptr(delayFlag))
+	_, _, err = syscall.Syscall(syscall.SYS_FCNTL, uintptr(bt.fd), syscall.F_SETFL, uintptr(delayFlag))
 	if err != 0 {
 		return errors.Wrap(err, "failed in SetBlocking")
 	}
@@ -110,23 +112,23 @@ func (bt *Bluetooth) SetBlocking(block bool) error {
 func NewBluetoothSocket(fd int) (*Bluetooth, error) {
 	bt := &Bluetooth{
 		fd:     fd,
-		family: unix.AF_BLUETOOTH,
-		typ:    unix.SOCK_SEQPACKET,
-		proto:  unix.BTPROTO_L2CAP,
+		family: syscall.AF_BLUETOOTH,
+		typ:    syscall.SOCK_SEQPACKET,
+		proto:  BTPROTO_L2CAP,
 		block:  false,
 	}
 
 	var rsa rawSockaddrL2
 
-	_, _, err := unix.RawSyscall(
-		unix.SYS_GETSOCKNAME,
+	_, _, err := syscall.RawSyscall(
+		syscall.SYS_GETSOCKNAME,
 		uintptr(fd),
 		uintptr(unsafe.Pointer(&rsa)),
 		uintptr(unsafe.Pointer(&addrlen)),
 	)
 
 	if int(err) != 0 {
-		unix.Close(fd)
+		syscall.Close(fd)
 		return nil, errors.Wrap(err, "failed in getsocketname")
 	}
 
@@ -146,20 +148,20 @@ func ListenBluetooth(psm uint, bklen int, block bool) (*Bluetooth, error) {
 	defer mu.Unlock()
 
 	bt := &Bluetooth{
-		family: unix.AF_BLUETOOTH,
-		typ:    unix.SOCK_SEQPACKET, // RFCOMM = SOCK_STREAM, L2CAP = SOCK_SEQPACKET, HCI = SOCK_RAW
-		proto:  unix.BTPROTO_L2CAP,
+		family: syscall.AF_BLUETOOTH,
+		typ:    syscall.SOCK_SEQPACKET, // RFCOMM = SOCK_STREAM, L2CAP = SOCK_SEQPACKET, HCI = SOCK_RAW
+		proto:  BTPROTO_L2CAP,
 		block:  block,
 	}
 
-	fd, err := unix.Socket(bt.family, bt.typ, bt.proto)
+	fd, err := syscall.Socket(bt.family, bt.typ, bt.proto)
 	if err != nil {
 		return nil, errors.Wrap(err, "socket could not be created")
 	}
 	logrus.Debugln("Socket created")
 
 	bt.fd = fd
-	unix.CloseOnExec(bt.fd)
+	syscall.CloseOnExec(bt.fd)
 
 	if err := bt.SetBlocking(block); err != nil {
 		bt.Close()
@@ -179,8 +181,8 @@ func ListenBluetooth(psm uint, bklen int, block bool) (*Bluetooth, error) {
 		return nil, err
 	}
 
-	_, _, sysErr := unix.Syscall(
-		unix.SYS_BIND,
+	_, _, sysErr := syscall.Syscall(
+		syscall.SYS_BIND,
 		uintptr(bt.fd),
 		uintptr(saddr),
 		uintptr(saddrlen),
@@ -192,7 +194,7 @@ func ListenBluetooth(psm uint, bklen int, block bool) (*Bluetooth, error) {
 
 	logrus.Debugln("Socket binded")
 
-	if err := unix.Listen(bt.fd, bklen); err != nil {
+	if err := syscall.Listen(bt.fd, bklen); err != nil {
 		bt.Close()
 		return nil, err
 	}
@@ -215,8 +217,8 @@ func (bt *Bluetooth) Accept() (*Bluetooth, error) {
 	for {
 		var raddr rawSockaddrL2
 
-		rFd, _, err := unix.Syscall(
-			unix.SYS_ACCEPT,
+		rFd, _, err := syscall.Syscall(
+			syscall.SYS_ACCEPT,
 			uintptr(bt.fd),
 			uintptr(unsafe.Pointer(&raddr)),
 			uintptr(unsafe.Pointer(&addrlen)),
@@ -230,7 +232,7 @@ func (bt *Bluetooth) Accept() (*Bluetooth, error) {
 			case syscall.ECONNABORTED:
 				continue
 			}
-			unix.Close(int(rFd))
+			syscall.Close(int(rFd))
 			return nil, err
 		}
 
@@ -253,7 +255,7 @@ func (bt *Bluetooth) Accept() (*Bluetooth, error) {
 		saddr:  *rAddr,
 	}
 
-	unix.CloseOnExec(nFd)
+	syscall.CloseOnExec(nFd)
 	logrus.Debugln("Accept closeonexec")
 
 	if err := rbt.SetBlocking(false); err != nil {
@@ -281,8 +283,8 @@ func (bt *Bluetooth) Read(b []byte) (int, error) {
 	// setFd(bt.fd, &fdSet{Bits: [32]int32{0}})
 
 	for {
-		r, _, err := unix.Syscall(
-			unix.SYS_READ,
+		r, _, err := syscall.Syscall(
+			syscall.SYS_READ,
 			uintptr(bt.fd),
 			uintptr(getPointer(b)),
 			uintptr(len(b)),
@@ -307,8 +309,8 @@ func (bt *Bluetooth) Write(d []byte) (int, error) {
 
 	// setFd(bt.fd, &fdSet{Bits: [32]int32{0}})
 
-	r, _, err := unix.Syscall(
-		unix.SYS_WRITE,
+	r, _, err := syscall.Syscall(
+		syscall.SYS_WRITE,
 		uintptr(bt.fd),
 		uintptr(getPointer(d)),
 		uintptr(len(d)),
@@ -327,8 +329,8 @@ func (bt *Bluetooth) Close() error {
 	defer bt.mu.Unlock()
 
 	if bt.fd <= 0 {
-		return unix.EINVAL
+		return syscall.EINVAL
 	}
 
-	return unix.Close(bt.fd)
+	return syscall.Close(bt.fd)
 }

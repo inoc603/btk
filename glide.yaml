@@ -1,4 +1,6 @@
 package: github.com/inoc603/btk
+ignore: 
+- golang.org/x/sys/unix
 import:
 - package: github.com/Sirupsen/logrus
   version: v0.11.2
@@ -9,4 +11,3 @@ import:
 - package: github.com/satori/go.uuid
   version: v1.1.0
 - package: github.com/zserge/hid
-- package: golang.org/x/sys/unix
