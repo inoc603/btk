@@ -1,0 +1,12 @@
+package: github.com/inoc603/btk
+import:
+- package: github.com/Sirupsen/logrus
+  version: v0.11.2
+- package: github.com/godbus/dbus
+  version: v4.0.0
+- package: github.com/pkg/errors
+  version: v0.8.0
+- package: github.com/satori/go.uuid
+  version: v1.1.0
+- package: github.com/zserge/hid
+- package: golang.org/x/sys/unix

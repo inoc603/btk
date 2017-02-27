@@ -1,0 +1,18 @@
+hash: 3e24229951251604628c80e1d56c4a2b4926bcf9f726b8549c6655aa188a0c38
+updated: 2017-02-27T16:11:54.335375041+08:00
+imports:
+- name: github.com/godbus/dbus
+  version: 5f6efc7ef2759c81b7ba876593971bfce311eab3
+- name: github.com/pkg/errors
+  version: 645ef00459ed84a119197bfb8d8205042c6df63d
+- name: github.com/satori/go.uuid
+  version: 879c5887cd475cd7864858769793b2ceb0d44feb
+- name: github.com/Sirupsen/logrus
+  version: c078b1e43f58d563c74cebe63c85789e76ddb627
+- name: github.com/zserge/hid
+  version: 8ac6f75332ed3cbdd4b5e48a10657dacc20643a4
+- name: golang.org/x/sys
+  version: e4594059fe4cde2daf423055a596c2cd1e6c9adf
+  subpackages:
+  - unix
+testImports: []
