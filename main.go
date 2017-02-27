@@ -32,8 +32,15 @@ func main() {
 
 	exitOnError("Failed to register profile", hidp.Register(kb.Desc()))
 
-	exec.Command("hciconfig hci0 piscan").Run()
-	exec.Command("hciconfig hci0 class 02540").Run()
+	exitOnError(
+		"Failed to set to piscan",
+		exec.Command("hciconfig", "hci0", "piscan").Run(),
+	)
+
+	exitOnError(
+		"Failed to set device class",
+		exec.Command("hciconfig", "hci0", "class", "02540").Run(),
+	)
 
 	logrus.WithField("desc", kb.Desc()).Infoln("HID profile registered")
 

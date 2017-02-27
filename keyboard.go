@@ -44,6 +44,7 @@ type Client struct {
 }
 
 type Keyboard struct {
+	// TODO: embed Client into Keyboard
 	dev    hid.Device
 	sdp    string
 	stop   chan struct{}
@@ -87,17 +88,19 @@ func (kb *Keyboard) Start() {
 		default:
 		}
 
+		// Set timeout to 1 second, so read does not block forever
 		state, err := kb.dev.Read(-1, time.Second)
 		if err != nil {
-			logrus.WithError(err).Errorln("Error in read")
+			// connection timeout is normal when the keyboard is idle
+			logrus.WithError(err).Debugln("Error in read")
 			continue
 		}
 
-		if kb.Sctrl == nil {
+		if kb.Sintr == nil {
 			continue
 		}
 
-		if _, err := kb.Sctrl.Write(append([]byte{0xA1}, state...)); err != nil {
+		if _, err := kb.Sintr.Write(append([]byte{0xA1}, state...)); err != nil {
 			logrus.WithError(err).Errorln("Error in write")
 			continue
 		}
@@ -141,7 +144,9 @@ func (kb *Keyboard) HandleEvent() {
 		d, err := kb.Sctrl.Read(r)
 
 		if err != nil || d < 1 {
-
+			// TODO: handle the error
+			logrus.WithError(err).Errorln("Failed to read from sctrl")
+			return
 		}
 
 		hsk := []byte{HIDPTRANSHANDSHAKE}
