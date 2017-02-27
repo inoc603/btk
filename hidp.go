@@ -1,14 +1,132 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"syscall"
+	"text/template"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/godbus/dbus"
 	"github.com/pkg/errors"
 	uuid "github.com/satori/go.uuid"
 )
+
+const sdpTpl = `
+<?xml version="1.0" encoding="UTF-8" ?>
+<record>
+	<attribute id="0x0001">
+		<sequence>
+			<uuid value="0x1124" />
+		</sequence>
+	</attribute>
+	<attribute id="0x0004">
+		<sequence>
+			<sequence>
+				<uuid value="0x0100" />
+				<uint16 value="0x0011" />
+			</sequence>
+			<sequence>
+				<uuid value="0x0011" />
+			</sequence>
+		</sequence>
+	</attribute>
+	<attribute id="0x0005">
+		<sequence>
+			<uuid value="0x1002" />
+		</sequence>
+	</attribute>
+	<attribute id="0x0006">
+		<sequence>
+			<uint16 value="0x656e" />
+			<uint16 value="0x006a" />
+			<uint16 value="0x0100" />
+		</sequence>
+	</attribute>
+	<attribute id="0x0009">
+		<sequence>
+			<sequence>
+				<uuid value="0x1124" />
+				<uint16 value="0x0100" />
+			</sequence>
+		</sequence>
+	</attribute>
+	<attribute id="0x000d">
+		<sequence>
+			<sequence>
+				<sequence>
+					<uuid value="0x0100" />
+					<uint16 value="0x0013" />
+				</sequence>
+				<sequence>
+					<uuid value="0x0011" />
+				</sequence>
+			</sequence>
+		</sequence>
+	</attribute>
+	<attribute id="0x0100">
+		<text value="Raspberry Pi Virtual Keyboard" />
+	</attribute>
+	<attribute id="0x0101">
+		<text value="USB > BT Keyboard" />
+	</attribute>
+	<attribute id="0x0102">
+		<text value="Raspberry Pi" />
+	</attribute>
+	<attribute id="0x0200">
+		<uint16 value="0x0100" />
+	</attribute>
+	<attribute id="0x0201">
+		<uint16 value="0x0111" />
+	</attribute>
+	<attribute id="0x0202">
+		<uint8 value="0x40" />
+	</attribute>
+	<attribute id="0x0203">
+		<uint8 value="0x00" />
+	</attribute>
+	<attribute id="0x0204">
+		<boolean value="true" />
+	</attribute>
+	<attribute id="0x0205">
+		<boolean value="true" />
+	</attribute>
+	<attribute id="0x0206">
+		<sequence>
+			<sequence>
+				<uint8 value="0x22" />
+				<text encoding="hex" value="{{.HIDDesc}}" />
+			</sequence>
+		</sequence>
+	</attribute>
+	<attribute id="0x0207">
+		<sequence>
+			<sequence>
+				<uint16 value="0x0409" />
+				<uint16 value="0x0100" />
+			</sequence>
+		</sequence>
+	</attribute>
+	<attribute id="0x020b">
+		<uint16 value="0x0100" />
+	</attribute>
+	<attribute id="0x020c">
+		<uint16 value="0x0c80" />
+	</attribute>
+	<attribute id="0x020d">
+		<boolean value="false" />
+	</attribute>
+	<attribute id="0x020e">
+		<boolean value="true" />
+	</attribute>
+	<attribute id="0x020f">
+		<uint16 value="0x0640" />
+	</attribute>
+	<attribute id="0x0210">
+		<uint16 value="0x0320" />
+	</attribute>
+</record>
+`
 
 type HidProfile struct {
 	bus  *dbus.Conn
@@ -44,22 +162,30 @@ func (p *HidProfile) Export() error {
 	)
 }
 
-func (p *HidProfile) Register(sdp string) error {
+func (p *HidProfile) Register(desc string) error {
 	callback := make(chan *dbus.Call, 1)
+
+	tpl, err := template.ParseGlob(sdpTpl)
+	if err != nil {
+		return err
+	}
+
+	sdp := bytes.NewBuffer(nil)
+	if err := tpl.Execute(sdp, struct{ HIDDesc string }{desc}); err != nil {
+		return err
+	}
 
 	opts := map[string]dbus.Variant{
 		"PSM": dbus.MakeVariant(uint16(PSMCTRL)),
 		"RequireAuthentication": dbus.MakeVariant(true),
 		"RequireAuthorization":  dbus.MakeVariant(true),
-		"ServiceRecord":         dbus.MakeVariant(sdp),
+		"ServiceRecord":         dbus.MakeVariant(sdp.String()),
 	}
 
-	err := p.bus.Object("org.bluez", "/org/bluez").Go(
+	if err = p.bus.Object("org.bluez", "/org/bluez").Go(
 		"org.bluez.ProfileManager1.RegisterProfile",
 		0, callback, p.path, p.uid, opts,
-	).Err
-
-	if err != nil {
+	).Err; err != nil {
 		return err
 	}
 

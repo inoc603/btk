@@ -29,7 +29,7 @@ func main() {
 
 	exitOnError("Failed to export profile", hidp.Export())
 
-	exitOnError("Failed to register profile", hidp.Register(kb.SDP()))
+	exitOnError("Failed to register profile", hidp.Register(kb.Desc()))
 
 	logrus.Infoln("HID profile registered")
 

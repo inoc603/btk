@@ -52,7 +52,7 @@ type Keyboard struct {
 	Sctrl  *Bluetooth
 }
 
-func (kb *Keyboard) SDP() string {
+func (kb *Keyboard) Desc() string {
 	return kb.sdp
 }
 
