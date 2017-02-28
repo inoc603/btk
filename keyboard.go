@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"sync"
 	"time"
 
 	"github.com/Sirupsen/logrus"
@@ -44,13 +45,13 @@ type Client struct {
 }
 
 type Keyboard struct {
-	// TODO: embed Client into Keyboard
+	sync.Mutex
+	client *Client
 	dev    hid.Device
 	sdp    string
 	stop   chan struct{}
-	client dbus.ObjectPath
-	Sintr  *Bluetooth
-	Sctrl  *Bluetooth
+	once   sync.Once
+	wg     sync.WaitGroup
 }
 
 func (kb *Keyboard) Desc() string {
@@ -79,11 +80,20 @@ func NewKeyboard() (*Keyboard, error) {
 	}, nil
 }
 
-func (kb *Keyboard) Start() {
+func (kb *Keyboard) Client() *Client {
+	kb.Lock()
+	defer kb.Unlock()
+	return kb.client
+}
+
+func (kb *Keyboard) HandleHID() {
+	kb.wg.Add(1)
+	defer kb.wg.Done()
+	defer kb.dev.Close()
+
 	for {
 		select {
 		case <-kb.stop:
-			kb.dev.Close()
 			return
 		default:
 		}
@@ -93,14 +103,17 @@ func (kb *Keyboard) Start() {
 		if err != nil {
 			// connection timeout is normal when the keyboard is idle
 			logrus.WithError(err).Debugln("Error in read")
+			// TODO: handle fatal error like device disconnection
 			continue
 		}
 
-		if kb.Sintr == nil {
+		client := kb.Client()
+
+		if client == nil {
 			continue
 		}
 
-		if _, err := kb.Sintr.Write(append([]byte{0xA1}, state...)); err != nil {
+		if _, err := client.Sintr.Write(append([]byte{0xA1}, state...)); err != nil {
 			logrus.WithError(err).Errorln("Error in write")
 			continue
 		}
@@ -108,45 +121,61 @@ func (kb *Keyboard) Start() {
 }
 
 func (kb *Keyboard) Stop() {
-	kb.stop <- struct{}{}
+	kb.Disconnect(kb.Client())
+	kb.once.Do(func() {
+		close(kb.stop)
+		kb.wg.Wait()
+		logrus.Infoln("Keyboard stopped")
+	})
 }
 
 func (kb *Keyboard) Connect(client *Client) error {
+	kb.Lock()
+	defer kb.Unlock()
 	// Only support one connection at a time, since controlling more than
 	// one device with one keyboard is typically not what we want
-	if kb.client != "" {
+	if kb.client != nil {
 		return errors.New("keyboard in use")
 	}
 
-	kb.client = client.Dev
-	kb.Sctrl = client.Sctrl
-	kb.Sintr = client.Sintr
+	kb.client = client
 
-	if _, err := kb.Sctrl.Write([]byte{0xA1, 0x13, 0x03}); err != nil {
+	if _, err := client.Sctrl.Write([]byte{0xA1, 0x13, 0x03}); err != nil {
 		return errors.Wrap(err, "failed to send hello on ctrl 1")
 	}
 
-	if _, err := kb.Sctrl.Write([]byte{0xA1, 0x13, 0x02}); err != nil {
+	if _, err := client.Sctrl.Write([]byte{0xA1, 0x13, 0x02}); err != nil {
 		return errors.Wrap(err, "failed to send hello on ctrl 2")
 	}
 
 	return nil
 }
 
-func (kb *Keyboard) HandleEvent() {
+func (kb *Keyboard) HandleHandshake() {
+	kb.wg.Add(1)
+	defer kb.wg.Done()
+
 	for {
-		if kb.Sctrl == nil {
+		select {
+		case <-kb.stop:
+			return
+		default:
+		}
+
+		client := kb.Client()
+		if client == nil {
 			time.Sleep(time.Second)
 			continue
 		}
 
 		r := make([]byte, BUFSIZE)
-		d, err := kb.Sctrl.Read(r)
+		d, err := client.Sctrl.Read(r)
 
 		if err != nil || d < 1 {
-			// TODO: handle the error
-			logrus.WithError(err).Errorln("Failed to read from sctrl")
-			return
+			logrus.WithError(err).WithField("read", d).
+				Errorln("Failed to read from sctrl")
+			kb.Disconnect(client)
+			continue
 		}
 
 		hsk := []byte{HIDPTRANSHANDSHAKE}
@@ -154,35 +183,38 @@ func (kb *Keyboard) HandleEvent() {
 
 		switch {
 		case (msgTyp & HIDPTRANSSETPROTOCOL) != 0:
-			logrus.Debugln("GoBt.procesCtrlEvent: handshake set protocol")
+			logrus.Debugln("handshake set protocol")
 			hsk[0] |= HIDPHSHKSUCCESSFUL
-			if _, err := kb.Sctrl.Write(hsk); err != nil {
-				logrus.Debugln("GoBt.procesCtrlEvent: handshake set protocol: failure on reply")
+			if _, err := client.Sctrl.Write(hsk); err != nil {
+				logrus.WithError(err).Debugln("handshake set protocol failed")
 			}
 		case (msgTyp & HIDPTRANSDATA) != 0:
-			logrus.Debugln("GoBt.procesCtrlEvent: handshake data")
+			logrus.Debugln("handshake data")
 		default:
-			logrus.Debugln("GoBt.procesCtrlEvent: unknown handshake message")
+			logrus.Debugln("unknown handshake message")
 			hsk[0] |= HIDPHSHKERRUNKNOWN
-			kb.Sctrl.Write(hsk)
+			client.Sctrl.Write(hsk)
 		}
 	}
 }
 
 func (kb *Keyboard) Disconnect(client *Client) error {
-	if client.Dev != kb.client {
+	kb.Lock()
+	defer kb.Unlock()
+
+	if client == nil || client.Dev != kb.client.Dev {
 		return nil
 	}
 
+	logrus.WithField("dev", client.Dev).Infoln("Disconnecting")
+
 	defer func() {
-		kb.Sctrl = nil
-		kb.Sintr = nil
-		kb.client = ""
+		kb.client = nil
 	}()
 
-	if err := kb.Sctrl.Close(); err != nil {
+	if err := client.Sctrl.Close(); err != nil {
 		return err
 	}
 
-	return kb.Sintr.Close()
+	return client.Sintr.Close()
 }

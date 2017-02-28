@@ -44,8 +44,8 @@ func main() {
 
 	logrus.WithField("desc", kb.Desc()).Infoln("HID profile registered")
 
-	go kb.Start()
-	go kb.HandleEvent()
+	go kb.HandleHID()
+	go kb.HandleHandshake()
 
 Loop:
 	for {
@@ -61,14 +61,12 @@ Loop:
 				client.Sintr.Close()
 			}
 		case client := <-hidp.Disconnection():
+			logrus.Warnln("disconnect")
 			kb.Disconnect(client)
 		}
 	}
 
-	// Probably no need of closing profile
-	exitOnError("Failed to unregister profile", errors.Cause(hidp.Unregister()))
-
-	logrus.Infoln("HID profile unregistered")
+	// Profile will be automatically unregistered by dbus
 
 	hidp.Close()
 }

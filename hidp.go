@@ -253,12 +253,10 @@ func (p *HidProfile) NewConnection(dev dbus.ObjectPath, fd dbus.UnixFD, fdProps 
 
 func (p *HidProfile) RequestDisconnection(dev dbus.ObjectPath) *dbus.Error {
 	logrus.WithField("device", dev).Infoln("Disconnection requested")
-
-	p.disconnection <- &Client{Dev: dev}
-
 	return nil
 }
 
 func (p *HidProfile) Close() {
-	logrus.Infoln("Close HID profile")
+	p.bus.Close()
+	p.connIntr.Close()
 }
