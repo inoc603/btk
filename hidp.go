@@ -128,6 +128,7 @@ const sdpTpl = `
 </record>
 `
 
+// HidProfile represents a dbus profile for the keyboard
 type HidProfile struct {
 	bus  *dbus.Conn
 	path dbus.ObjectPath
@@ -139,22 +140,18 @@ type HidProfile struct {
 	disconnection chan *Client
 }
 
-func (p *HidProfile) UUID() string {
-	return p.uid
-}
-
-func (p *HidProfile) Path() dbus.ObjectPath {
-	return p.path
-}
-
+// Connection returns a channel of new bluetooth connection
 func (p *HidProfile) Connection() chan *Client {
 	return p.connection
 }
 
+// Disconnection is designed to returns a channel of disconnction requests,
+// but currently it doesn't work
 func (p *HidProfile) Disconnection() chan *Client {
 	return p.disconnection
 }
 
+// Export exports the profile
 func (p *HidProfile) Export() error {
 	return errors.Wrap(
 		p.bus.Export(p, p.path, "org.bluez.Profile1"),
@@ -162,6 +159,7 @@ func (p *HidProfile) Export() error {
 	)
 }
 
+// Register registers the profile to dbus
 func (p *HidProfile) Register(desc string) error {
 	callback := make(chan *dbus.Call, 1)
 
@@ -192,6 +190,7 @@ func (p *HidProfile) Register(desc string) error {
 	return (<-callback).Err
 }
 
+// Unregister unregisters the profile from dbus
 func (p *HidProfile) Unregister() error {
 	return p.bus.Object("org.bluez", "/org/bluez").Call(
 		"org.bluez.ProfileManager1.UnregisterProfile",
@@ -199,6 +198,7 @@ func (p *HidProfile) Unregister() error {
 	).Err
 }
 
+// NewHidProfile returns a new HidProfile on the given path
 func NewHidProfile(path string) (*HidProfile, error) {
 	connIntr, err := ListenBluetooth(PSMINTR, 1, false)
 	if err != nil {
@@ -220,11 +220,13 @@ func NewHidProfile(path string) (*HidProfile, error) {
 	}, nil
 }
 
+// Release is called when the profile is unregisterd
 func (p *HidProfile) Release() *dbus.Error {
 	logrus.Debugln("Release")
 	return nil
 }
 
+// NewConnection handles new bluetooth connections
 func (p *HidProfile) NewConnection(dev dbus.ObjectPath, fd dbus.UnixFD, fdProps map[string]dbus.Variant) *dbus.Error {
 	logrus.Debugln("NewConnection", dev, fd, fdProps)
 
@@ -246,16 +248,18 @@ func (p *HidProfile) NewConnection(dev dbus.ObjectPath, fd dbus.UnixFD, fdProps 
 
 	logrus.Infoln("New bluetooth socket created")
 
-	p.connection <- &Client{dev, sintr, sctrl}
+	p.connection <- &Client{dev, sintr, sctrl, make(chan struct{})}
 
 	return nil
 }
 
+// RequestDisconnection ... I don't know how to use this yet
 func (p *HidProfile) RequestDisconnection(dev dbus.ObjectPath) *dbus.Error {
 	logrus.WithField("device", dev).Infoln("Disconnection requested")
 	return nil
 }
 
+// Close shuts down the profile
 func (p *HidProfile) Close() {
 	p.bus.Close()
 	p.connIntr.Close()

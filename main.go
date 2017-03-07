@@ -22,6 +22,9 @@ func userInterrupt() chan os.Signal {
 }
 
 func main() {
+	if os.Getenv("DEBUG") == "1" {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
 	kb, err := NewKeyboard()
 	exitOnError("Failed to create keyboard", err)
 
@@ -32,11 +35,13 @@ func main() {
 
 	exitOnError("Failed to register profile", hidp.Register(kb.Desc()))
 
+	// make the device discoverable
 	exitOnError(
 		"Failed to set to piscan",
 		exec.Command("hciconfig", "hci0", "piscan").Run(),
 	)
 
+	// set the device class to keyboard
 	exitOnError(
 		"Failed to set device class",
 		exec.Command("hciconfig", "hci0", "class", "02540").Run(),
@@ -45,14 +50,13 @@ func main() {
 	logrus.WithField("desc", kb.Desc()).Infoln("HID profile registered")
 
 	go kb.HandleHID()
-	go kb.HandleHandshake()
 
 Loop:
 	for {
 		select {
 		case sig := <-userInterrupt():
 			logrus.WithField("signal", sig.String()).
-				Errorln("Exiting on user interrupt")
+				Warnln("Exiting on user interrupt")
 			kb.Stop()
 			break Loop
 		case client := <-hidp.Connection():
@@ -60,13 +64,12 @@ Loop:
 				client.Sctrl.Close()
 				client.Sintr.Close()
 			}
-		case client := <-hidp.Disconnection():
-			logrus.Warnln("disconnect")
-			kb.Disconnect(client)
+			// case client := <-hidp.Disconnection():
+			// logrus.Warnln("disconnect")
+			// kb.Disconnect(client)
 		}
 	}
 
 	// Profile will be automatically unregistered by dbus
-
 	hidp.Close()
 }

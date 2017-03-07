@@ -12,14 +12,17 @@ import (
 )
 
 const (
-	HIDPHEADERTRANSMASK = 0xf0
+	hidpHeaderTransMask = 0xf0
 
-	HIDPTRANSHANDSHAKE   = 0x00
-	HIDPTRANSSETPROTOCOL = 0x60
-	HIDPTRANSDATA        = 0xa0
+	hidpTransHandshake   = 0x00
+	hidpTransSetProtocol = 0x60
+	hidpTransData        = 0xa0
 
-	HIDPHSHKSUCCESSFUL = 0x00
-	HIDPHSHKERRUNKNOWN = 0x0e
+	hidpHshkSuccessful = 0x00
+	hidpHshkErrUnknown = 0x0e
+
+	protocolKeyboard = 1
+	protocolMouse    = 2
 )
 
 func getFirstKeyboard() (kb hid.Device, found bool) {
@@ -28,8 +31,7 @@ func getFirstKeyboard() (kb hid.Device, found bool) {
 			return
 		}
 
-		// Protofol 1 for keyboard, 2 for mouse
-		if d.Info().Protocol == 1 {
+		if d.Info().Protocol == protocolKeyboard {
 			kb = d
 			found = true
 		}
@@ -38,26 +40,29 @@ func getFirstKeyboard() (kb hid.Device, found bool) {
 	return
 }
 
+// Client represents a bluetooth client
 type Client struct {
 	Dev   dbus.ObjectPath
 	Sintr *Bluetooth
 	Sctrl *Bluetooth
+	Done  chan struct{}
 }
 
+// Keyboard represents a HID keyboard
 type Keyboard struct {
 	sync.Mutex
 	client *Client
 	dev    hid.Device
 	sdp    string
-	stop   chan struct{}
 	once   sync.Once
-	wg     sync.WaitGroup
 }
 
+// Desc returns the HID descriptor of the usb keyboard
 func (kb *Keyboard) Desc() string {
 	return kb.sdp
 }
 
+// NewKeyboard returns a new keyboard on the first usb keyboard connected.
 func NewKeyboard() (*Keyboard, error) {
 	dev, ok := getFirstKeyboard()
 	if !ok {
@@ -74,61 +79,64 @@ func NewKeyboard() (*Keyboard, error) {
 	}
 
 	return &Keyboard{
-		dev:  dev,
-		stop: make(chan struct{}),
-		sdp:  hex.EncodeToString(desc),
+		dev: dev,
+		sdp: hex.EncodeToString(desc),
 	}, nil
 }
 
+// Client returns the current bluetooth client of the keyboard
 func (kb *Keyboard) Client() *Client {
 	kb.Lock()
 	defer kb.Unlock()
 	return kb.client
 }
 
+// HandleHID starts a loop to read from the usb keyboard, it blocks until there's
+// a fatal error reading from the keyboard, e.g. keyboard disconnection
 func (kb *Keyboard) HandleHID() {
-	kb.wg.Add(1)
-	defer kb.wg.Done()
 	defer kb.dev.Close()
 
 	for {
-		select {
-		case <-kb.stop:
-			return
-		default:
-		}
-
 		// Set timeout to 1 second, so read does not block forever
 		state, err := kb.dev.Read(-1, time.Second)
 		if err != nil {
-			// connection timeout is normal when the keyboard is idle
-			logrus.WithError(err).Debugln("Error in read")
+			// connection timeout is normal when the keyboard is idle.
+			// Although inspecting the error message is not a good
+			// way to check the error, we'll get on with it to
+			// prevent the too many debug log
+			if err.Error() != "connection timed out" {
+				logrus.WithError(err).Errorln("Error in read from keyboard")
+			}
 			// TODO: handle fatal error like device disconnection
 			continue
 		}
 
-		client := kb.Client()
+		logrus.WithField("state", state).Debugln("Keyboard input")
 
+		client := kb.Client()
 		if client == nil {
 			continue
 		}
 
 		if _, err := client.Sintr.Write(append([]byte{0xA1}, state...)); err != nil {
-			logrus.WithError(err).Errorln("Error in write")
+			logrus.WithError(err).Errorln("Error in write to client")
 			continue
 		}
 	}
 }
 
+// Stop close the usb keyboard
 func (kb *Keyboard) Stop() {
-	kb.Disconnect(kb.Client())
 	kb.once.Do(func() {
-		close(kb.stop)
-		kb.wg.Wait()
-		logrus.Infoln("Keyboard stopped")
+		// Violently close the usb keyboard, HandleHID() will exit on error
+		kb.dev.Close()
+		logrus.Warnln("Keyboard stopped")
 	})
 }
 
+// Connect hooks up the given client with the usb keyboard, and start piping
+// keypresses to the client. Will return an error if the keyboard is already
+// in use
 func (kb *Keyboard) Connect(client *Client) error {
 	kb.Lock()
 	defer kb.Unlock()
@@ -148,56 +156,64 @@ func (kb *Keyboard) Connect(client *Client) error {
 		return errors.Wrap(err, "failed to send hello on ctrl 2")
 	}
 
+	go kb.handleHandshake()
+
 	return nil
 }
 
-func (kb *Keyboard) HandleHandshake() {
-	kb.wg.Add(1)
-	defer kb.wg.Done()
+// handleHandshake handles bluetooth handshake messages, and it's also an
+// indicator of client disconnection
+func (kb *Keyboard) handleHandshake() {
+	client := kb.client
+	if client == nil {
+		return
+	}
+	logger := logrus.WithField("client", client.Dev)
+	logger.Debugln("Start handling handshake")
 
 	for {
 		select {
-		case <-kb.stop:
+		case <-client.Done:
+			logger.Debugln("Exit handling handshake")
 			return
 		default:
-		}
-
-		client := kb.Client()
-		if client == nil {
-			time.Sleep(time.Second)
-			continue
 		}
 
 		r := make([]byte, BUFSIZE)
 		d, err := client.Sctrl.Read(r)
 
 		if err != nil || d < 1 {
-			logrus.WithError(err).WithField("read", d).
+			// a read error means the client has disconnected
+			logger.WithError(err).WithField("read", d).
 				Errorln("Failed to read from sctrl")
 			kb.Disconnect(client)
 			continue
 		}
 
-		hsk := []byte{HIDPTRANSHANDSHAKE}
-		msgTyp := r[0] & HIDPHEADERTRANSMASK
+		hsk := []byte{hidpTransHandshake}
+		msgTyp := r[0] & hidpHeaderTransMask
 
 		switch {
-		case (msgTyp & HIDPTRANSSETPROTOCOL) != 0:
-			logrus.Debugln("handshake set protocol")
-			hsk[0] |= HIDPHSHKSUCCESSFUL
+		case (msgTyp & hidpTransSetProtocol) != 0:
+			logger.Debugln("handshake set protocol")
+			hsk[0] |= hidpHshkSuccessful
 			if _, err := client.Sctrl.Write(hsk); err != nil {
-				logrus.WithError(err).Debugln("handshake set protocol failed")
+				logger.WithError(err).Debugln("handshake set protocol failed")
 			}
-		case (msgTyp & HIDPTRANSDATA) != 0:
-			logrus.Debugln("handshake data")
+		case (msgTyp & hidpTransData) != 0:
+			logger.Debugln("handshake data")
 		default:
-			logrus.Debugln("unknown handshake message")
-			hsk[0] |= HIDPHSHKERRUNKNOWN
+			logger.Debugln("unknown handshake message")
+			hsk[0] |= hidpHshkErrUnknown
 			client.Sctrl.Write(hsk)
 		}
 	}
 }
 
+// Disconnect closes the connection to the given bluetooth client
+// Currently this is just some cleanning up. It can't close the actual
+// bluetooth connection, and will block on the attempt
+// TODO: Find a way to close the connection
 func (kb *Keyboard) Disconnect(client *Client) error {
 	kb.Lock()
 	defer kb.Unlock()
@@ -206,9 +222,10 @@ func (kb *Keyboard) Disconnect(client *Client) error {
 		return nil
 	}
 
-	logrus.WithField("dev", client.Dev).Infoln("Disconnecting")
+	logrus.WithField("client", client.Dev).Infoln("Disconnecting")
 
 	defer func() {
+		close(kb.client.Done)
 		kb.client = nil
 	}()
 
