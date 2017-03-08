@@ -1,4 +1,5 @@
 # btk
+[![GoDoc](https://godoc.org/github.com/inoc603/btk?status.svg)](http://godoc.org/github.com/inoc603/btk)
 Keyboard relay from USB to Bluetooth
 
 **NOTE**: Only works on Linux
