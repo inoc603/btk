@@ -44,6 +44,11 @@ cd $GOPATH/src/github.com/inoc603/btk
 make build
 ```
 
+## TODO
+
+- Be able to plug/unplug usb keyboard without restarting the program
+- Reset usb keyboard after the program crashes
+
 ## Credits
 
 Inspired by these amazing projects and articles:

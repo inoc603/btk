@@ -6,6 +6,7 @@ import (
 	"os/signal"
 
 	"github.com/Sirupsen/logrus"
+	"github.com/inoc603/btk"
 	"github.com/pkg/errors"
 )
 
@@ -25,10 +26,10 @@ func main() {
 	if os.Getenv("DEBUG") == "1" {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
-	kb, err := NewKeyboard()
+	kb, err := btk.NewKeyboard()
 	exitOnError("Failed to create keyboard", err)
 
-	hidp, err := NewHidProfile("/red/potch/profile")
+	hidp, err := btk.NewHidProfile("/red/potch/profile")
 	exitOnError("Failed to create HID profile", err)
 
 	exitOnError("Failed to export profile", hidp.Export())
